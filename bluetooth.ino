@@ -110,17 +110,20 @@ void bt_door_command(void)
     
             if(strcmp(bt_command["event"], "door-unlock") == 0)
             {
-                if(door_is_lock == false || door_is_open == true)
+                if(door_is_closed == false)
                 {
                     Serial2.println("{\"status\":\"door_aleady_open\"}");
                 }
                 else if(bt_door_id == eeprom_read(door_id_addr) && bt_key == eeprom_read(door_key_addr))
                 {
-                    system_log("LOCK", "membuka pintu ...");
-                    buzzer_count = 2;
+                    system_log("LOCK", "bluetooth membuka pintu ...");
+                    
+                    set_solenoid_active(true);
                     actor_id = bt_user_id;
-                    lock_open();
-                    door_close_wait_time = millis();
+
+                    buzzer_count = 2;
+                    waiting_timeout = true;
+                    door_timeout = millis();
                     Serial2.println("{\"status\":\"success\"}");
                 }
                 else

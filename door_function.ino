@@ -1,60 +1,18 @@
-void set_door_lock(bool is_lock, String actor)
+void set_solenoid_active(bool active)
 {
-    door_is_lock = is_lock;
-    actor_id = actor;
-    lock_status_change = true;
-}
-
-void lock_open(void)
-{
-    // tulis perintah aktuator disini
-    digitalWrite(solenoid, HIGH);
-    
-    system_log("LOCK", "kunci pintu terbuka");
-    lock_is_open = true;
-}
-
-void lock_close(bool alert, String actor)
-{
-    system_log("LOCK", "mengunci pintu ...");
-
-    if(door_is_open == true)
+    if(active == true)
     {
-        system_log("LOCK", "pintu masih terbuka tidak bisa dikunci, menuggu pintu tertutup ...");
-        waiting_door_close = true;
+        digitalWrite(solenoid, HIGH);
+        solenoid_is_active = true;
 
-        if(door_is_lock == true)
-        {
-            set_door_lock(false, actor);
-        }
-        
-        if(alert == true)
-        {
-            alert_message = "Pintu masih terbuka tidak bisa dikunci, menunggu pintu tertutup ...";
-            alert_status_change = true;
-        }
+        system_log("LOCK", "solenoid aktif (terbuka)");
     }
     else
     {
-        if(schedule_is_running == true)
-        {
-            system_log("LOCK", "jadwal sedang berjalan, pintu tidak boleh dikunci");
-        }
-        else
-        {
-            // tulis perintah aktuator disini
-            digitalWrite(solenoid, LOW);
+        digitalWrite(solenoid, LOW);
+        solenoid_is_active = false;
 
-            system_log("LOCK", "pintu terkunci");
-            lock_is_open = false;
-            waiting_door_close = false;
-
-            // update ke server
-            if(door_is_lock == false)
-            {
-                set_door_lock(true, actor);
-            }
-        }
+        system_log("LOCK", "solenoid non-aktif (tertutup)");
     }
 }
 
@@ -64,7 +22,7 @@ void update_door(void)
     digitalWrite(data_status, HIGH);
 
     // kirim request
-    String door_status = (door_is_lock == true) ? "1" : "0";
+    String door_status = (door_is_locked == true) ? "1" : "0";
     String status_response = post_request("/update-status", "door_id=" + eeprom_read(door_id_addr) + "&office_id=" + eeprom_read(office_id_addr) + "&socket_id=" + socket_id + "&lock_status=" + door_status + "&user_id=" + actor_id);
 
     if(status_response != "error")
@@ -227,14 +185,25 @@ void door_command(JSONVar command)
     // cek apakah perintah untuk pintu ini
     if(door_id == eeprom_read(door_id_addr) && key == eeprom_read(door_key_addr))
     {
+        actor_id = user_id;
+        
         if(locking == "open")
         {
-            // lock_open();
-            set_door_lock(false, user_id);
+            door_is_locked = false;
+            lock_status_change = true;
         }
         else if(locking == "lock")
         {
-            lock_close(true, user_id);
+            if(door_is_closed == false)
+            {
+                alert_message = "Pintu masih terbuka, menunggu pintu tertutup ...";
+                alert_status_change = true;
+            }
+            else
+            {
+                door_is_locked = true; 
+                lock_status_change = true;  
+            }
         }
 
         buzzer_count = 2;
@@ -278,10 +247,11 @@ void door_schedule(JSONVar schedule)
             timeout_second = get_time_integer(schedule_end, 2);
 
             rtc.setTime(get_time_integer(server_time, 2), get_time_integer(server_time, 1), get_time_integer(server_time, 0), 21, 5, 2023);
-            
-            // lock_open();
-            set_door_lock(false, user_id);
 
+            // buka kunci pintu
+            door_is_locked = false;
+            lock_status_change = true;
+            
             // jalankan penjadwalan
             schedule_is_running = true;
 
@@ -289,7 +259,10 @@ void door_schedule(JSONVar schedule)
         }
         else if(command == "stop")
         {
-            lock_close(false, user_id);
+            // kunci pintu
+            door_is_locked = false;
+            lock_status_change = true;
+            
             schedule_is_running = false;
 
             system_log("LOCK", "jadwal dibatalkan, mengunci pintu ...");

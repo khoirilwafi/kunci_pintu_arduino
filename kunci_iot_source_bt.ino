@@ -13,9 +13,9 @@ WebsocketsClient client;
 ESP32Time rtc;
 
 // led pin
-#define wifi_status 27
+#define wifi_status 13
 #define data_status 14
-#define lock_status 13
+#define lock_status 27
 
 // sensor dan aktuator
 #define button      26
@@ -91,7 +91,7 @@ uint32_t socket_ping_interval = 0;
 uint32_t button_pressed_time = 0;
 
 // tick interval untuk door lock
-uint32_t door_close_wait_time  = 0;
+uint32_t door_timeout = 0;
 uint32_t waiting_door_interval = 0;
 
 // data untuk touch
@@ -113,18 +113,19 @@ String alert_message = "";
 bool wifi_is_connected = false;
 
 // event status untuk client serve
-bool device_is_login      = false;
+bool device_is_login      = true;
 bool socket_is_connected  = false;
 bool device_is_subscribe  = false;
 bool device_got_signature = false;
 
 // event status untuk door lock
-bool door_is_lock        = true;
-bool lock_is_open        = false;
-bool door_is_open        = false;
+bool door_is_locked      = true;
+bool solenoid_is_active  = false;
+bool door_is_closed      = true;
 bool lock_status_change  = false;
 bool alert_status_change = false;
 bool waiting_door_close  = false;
+bool waiting_timeout     = false;
 
 // event status untuk tombol
 bool button_is_pressed = false;
@@ -186,7 +187,12 @@ void setup(void)
 
         while(1)
         {
+            digitalWrite(wifi_status, LOW);
+            digitalWrite(data_status, LOW);
+            digitalWrite(lock_status, LOW);
+            
             config_loop();
+            
             delay(5);
         }
     }
@@ -236,30 +242,6 @@ void loop(void)
         bt_door_command();
     }
 
-    // jalankan polling touch
-    touch_value += touchRead(4);
-
-    // jalankan pengecekan touch
-    if(touch_interval < 20)
-    {
-        touch_interval ++;
-    }
-    else
-    {
-        touch_avg = touch_value / 20;
-
-        touch_interval = 0;
-        touch_value = 0;
-    }
-
-    // jika pintu tidak terkunci dan touch aktif
-    if(door_is_lock == false && lock_is_open == false && touch_avg <= 25)
-    {
-        lock_open();
-        door_close_wait_time = millis();
-    }
-    
-
     // semua proses yang membutuhkan koneksi wifi
     if(wifi_is_connected == true)
     {
@@ -302,114 +284,159 @@ void loop(void)
         }
     }
 
-    // cek apakah pintu terbuka
-    if(digitalRead(sensor) == 1)
+    // -----------------------------------------------------------
+    // mekanisme penguncian
+    // -----------------------------------------------------------
+
+
+    // cek kondisi pintu terbuka atau tidak
+    if(digitalRead(sensor) == 0)
     {
-        door_is_open = true;
-        delay(100);
+        door_is_closed = true;
+        waiting_door_close = false;
     }
     else
     {  
-        door_is_open = false;
-        delay(100);
+        door_is_closed = false;
     }
 
-    // kirimkan alert jika pintu terbuka tanpa autentikasi
-    if(door_is_open == true && door_is_lock == true && lock_is_open == false && waiting_door_close == false)
-    {
-        alert_message = "Pintu terbuka tanpa autentikasi yang sah, Menunggu pintu ditutup ...";
-        alert_status_change = true;
 
-        lock_open();
-        set_door_lock(false, eeprom_read(door_id_addr));
-        waiting_door_close = true;
-
-        delay(100);
-    }
-           
-    // jika tombol ditekan
-    if(digitalRead(button) == LOW && button_is_pressed == false && waiting_door_close == false)
+    // cek apakah tombol (open) ditekan
+    if(digitalRead(button) == LOW && button_is_pressed == false && waiting_door_close == false && door_is_closed == true)
     {
+        actor_id = eeprom_read(door_id_addr);
+        
         button_is_pressed = true;
         button_pressed_time = millis();
     }
 
-    // jika tombol dilepas
+    // jika tombol dilepas 
     if(digitalRead(button) == HIGH && button_is_pressed == true)
     {
-        // jika tombol ditekan lebih dari 1 detik
+        // jika tombol ditekan lama (lebih dari 700 ms)
         if((millis() - button_pressed_time) > 700)
         {
-            buzzer_count = 3;
-
-            // jika pintu terkunci, buka kunci pintu
-            if(door_is_lock == true)
-            {
-                actor_id = eeprom_read(door_id_addr);
-                lock_open();
-                set_door_lock(false, eeprom_read(door_id_addr));
-            }
-
-            // jika pintu terbuka, kunci pintu
-            else
-            {
-                actor_id = eeprom_read(door_id_addr);
-                lock_close(false, eeprom_read(door_id_addr));
-            }
+            // no function
         }
-        else if(door_is_lock == true)
-        {
-            buzzer_count = 2;
-            actor_id = eeprom_read(door_id_addr);
 
-            // buka kunci sementara
-            lock_open();
-            door_close_wait_time = millis();
+        // jika tombol ditekan cepat
+        else
+        {
+            set_solenoid_active(true);
+
+            buzzer_count = 2;
+            waiting_timeout = true;
+            door_timeout = millis();
         }
 
         button_is_pressed = false;
     }
 
-    // cek jika kunci pintu terbuka lebih dari 15 detik
-    if(lock_is_open == true && door_is_lock == true && waiting_door_close == false && (millis() - door_close_wait_time) > 15000)
+    // jika pintu dibuka dan solenoid aktif
+    if(door_is_closed == false && solenoid_is_active == true)
     {
-        system_log("LOCK", "door open timeout");
-        lock_close(false, eeprom_read(door_id_addr));
-        buzzer_count = 2;
+        set_solenoid_active(false);
     }
 
-    // menunggu pintu tertutup
+    // jika sudah timeout
+    if((millis() - door_timeout) > 10000 && waiting_timeout == true)
+    {
+        // matikan solenoid
+        if(solenoid_is_active == true)
+        {
+            set_solenoid_active(false);
+            buzzer_count = 2;
+        }
+
+        // jika pintu masih terbuka
+        if(door_is_locked == true && door_is_closed == false)
+        {
+            waiting_door_close = true;
+            
+            // update status pintu terbuka
+            door_is_locked = false;
+            lock_status_change = true;
+        }
+
+        waiting_timeout = false;
+    }
+
+    // jika sedang menunggu pintu tertutup
     if(waiting_door_close == true && (millis() - waiting_door_interval) > 5000)
     {
-        system_log("LOCK", "menunggu pintu tertutup ...");
-        waiting_door_interval = millis();
         buzzer_count = 4;
+        waiting_door_interval = millis();
     }
 
-    // kondisi saat pintu tertutup
-    if(waiting_door_close == true && door_is_open == false)
+
+    // polling sensor sentuh
+    touch_value += touchRead(4);
+
+    // hitung nilai rata-rata sensor dari 20x pembacaan
+    if(touch_interval < 20)
     {
-        lock_close(false, eeprom_read(door_id_addr));
-        buzzer_count = 2;
+        touch_interval ++;
+    }
+    else
+    {
+        touch_avg = touch_value / 20;
 
-        delay(500);
+        touch_interval = 0;
+        touch_value = 0;
     }
 
-    // cek schedule
-    if(schedule_is_running == true &&(millis() - schedule_check_interval) > 1000)
+    // jika sensor disentuh 
+    if((touch_avg <= 25) && waiting_door_close == false && door_is_closed == true && waiting_timeout == false && door_is_locked == false)
+    {
+        set_solenoid_active(true);
+
+        buzzer_count = 2;
+        waiting_timeout = true;
+        door_timeout = millis();
+    }
+
+
+    // cek penjadwalan
+    if(schedule_is_running == true && (millis() - schedule_check_interval) > 1000)
     {
         // jika jadwal sudah berakhir
         if(rtc.getHour(true) >= timeout_hour && rtc.getMinute() >= timeout_minute && rtc.getSecond() >= timeout_second)
         {
             system_log("LOCK", "jadwal berakhir, mengunci pintu ...");
 
+            if(door_is_closed == false)
+            {
+                alert_message = "Pintu masih terbuka, menunggu pintu tertutup ...";
+                alert_status_change = true;
+            }
+            else
+            {
+                door_is_locked = true; 
+                lock_status_change = true;  
+            }
+
             schedule_is_running = false;
-            lock_close(false, eeprom_read(door_id_addr));
             buzzer_count = 2;
         }
 
         schedule_check_interval = millis();
     }
+
+
+    // cek jika pintu terbuka secara paksa
+    if(door_is_closed == false && solenoid_is_active == false && door_is_locked == true && waiting_timeout == false)
+    {
+        // kirim peringatan
+        alert_message = "Pintu terbuka tanpa autentikasi yang sah, Menunggu pintu ditutup ...";
+        alert_status_change = true;
+        
+        // update status pintu terbuka
+        door_is_locked = false;
+        lock_status_change = true;
+
+        waiting_door_close = true;
+    }
+
 
     // delay untuk kestabilan
     delay(5);

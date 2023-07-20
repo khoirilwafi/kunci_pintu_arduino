@@ -14,7 +14,6 @@ void wifi_event(WiFiEvent_t event)
             system_log("WIFI", "terhubung"); 
             wifi_is_connected    = true;
             lock_status_change   = true;
-            device_is_login      = false;
             socket_is_connected  = false;
             device_is_subscribe  = false;
             device_got_signature = false;

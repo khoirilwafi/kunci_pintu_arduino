@@ -11,7 +11,7 @@ void led_blink_task(void* pvParameters)
             digitalWrite(wifi_status, HIGH);
         }
 
-        if(door_is_lock == false)
+        if(door_is_locked == false)
         {
             digitalWrite(lock_status, !digitalRead(lock_status));
         }
