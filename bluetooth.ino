@@ -3,6 +3,7 @@ void config_loop(void)
     if(Serial2.available())
     {
         String bt_message = Serial2.readStringUntil('\n');
+        Serial.println(bt_message);
         bt_message.trim();
 
         // cek format pesan
@@ -110,7 +111,7 @@ void bt_door_command(void)
     
             if(strcmp(bt_command["event"], "door-unlock") == 0)
             {
-                if(door_is_closed == false)
+                if(door_is_locked == false)
                 {
                     Serial2.println("{\"status\":\"door_aleady_open\"}");
                 }

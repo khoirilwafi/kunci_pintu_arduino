@@ -180,6 +180,9 @@ void setup(void)
     // hubungkan ke akses point
     WiFi.begin(eeprom_read(wifi_ssid_addr).c_str(), eeprom_read(wifi_pass_addr).c_str());
 
+    Serial.println(eeprom_read(wifi_ssid_addr));
+    Serial.println(eeprom_read(wifi_pass_addr));
+
     // jika tombol ditekan saat booting, masuk mode konfigurasi
     if(digitalRead(button) == LOW)
     {
@@ -362,7 +365,7 @@ void loop(void)
     }
 
     // jika sedang menunggu pintu tertutup
-    if(waiting_door_close == true && (millis() - waiting_door_interval) > 5000)
+    if(waiting_door_close == true && (millis() - waiting_door_interval) > 20000)
     {
         buzzer_count = 4;
         waiting_door_interval = millis();
