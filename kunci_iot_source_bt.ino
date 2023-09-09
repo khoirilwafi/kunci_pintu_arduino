@@ -120,6 +120,8 @@ bool device_got_signature = false;
 
 // event status untuk door lock
 bool door_is_locked      = true;
+bool door_must_lock      = true;
+bool door_in_alert       = false;
 bool solenoid_is_active  = false;
 bool door_is_closed      = true;
 bool lock_status_change  = false;
@@ -248,7 +250,7 @@ void loop(void)
     // semua proses yang membutuhkan koneksi wifi
     if(wifi_is_connected == true)
     {
-        // konek ke webbsocket server
+        // konek ke websocket server
         if(socket_is_connected == false && (millis() - socket_action_interval) > 3000)
         {
             system_log("SOCK", "menghubungkan ...");
@@ -296,13 +298,22 @@ void loop(void)
     if(digitalRead(sensor) == 0)
     {
         door_is_closed = true;
-        waiting_door_close = false;
+
+        if(door_must_lock == true && waiting_door_close == true)
+        {
+            door_is_locked = true;
+            lock_status_change = true;
+        }
+
+        if(door_in_alert == false)
+        {
+            waiting_door_close = false;
+        }
     }
     else
     {  
         door_is_closed = false;
     }
-
 
     // cek apakah tombol (open) ditekan
     if(digitalRead(button) == LOW && button_is_pressed == false && waiting_door_close == false && door_is_closed == true)
@@ -342,7 +353,7 @@ void loop(void)
     }
 
     // jika sudah timeout
-    if((millis() - door_timeout) > 10000 && waiting_timeout == true)
+    if((millis() - door_timeout) > 15000 && waiting_timeout == true)
     {
         // matikan solenoid
         if(solenoid_is_active == true)
@@ -358,6 +369,7 @@ void loop(void)
             
             // update status pintu terbuka
             door_is_locked = false;
+            door_must_lock = true;
             lock_status_change = true;
         }
 
@@ -365,12 +377,11 @@ void loop(void)
     }
 
     // jika sedang menunggu pintu tertutup
-    if(waiting_door_close == true && (millis() - waiting_door_interval) > 20000)
+    if(waiting_door_close == true && (millis() - waiting_door_interval) > 2000)
     {
         buzzer_count = 4;
         waiting_door_interval = millis();
     }
-
 
     // polling sensor sentuh
     touch_value += touchRead(4);
@@ -398,7 +409,6 @@ void loop(void)
         door_timeout = millis();
     }
 
-
     // cek penjadwalan
     if(schedule_is_running == true && (millis() - schedule_check_interval) > 1000)
     {
@@ -407,16 +417,24 @@ void loop(void)
         {
             system_log("LOCK", "jadwal berakhir, mengunci pintu ...");
 
+            actor_id = eeprom_read(door_id_addr);
+
             if(door_is_closed == false)
             {
-                alert_message = "Pintu masih terbuka, menunggu pintu tertutup ...";
+                alert_message = "Jadwal telah selesai tapi pintu masih terbuka, menunggu pintu tertutup ...";
                 alert_status_change = true;
+                
+                door_is_locked = false; 
+                waiting_door_close = true;
             }
             else
             {
                 door_is_locked = true; 
-                lock_status_change = true;  
+                waiting_door_close = false;
             }
+
+            door_must_lock = true;
+            lock_status_change = true; 
 
             schedule_is_running = false;
             buzzer_count = 2;
@@ -425,23 +443,39 @@ void loop(void)
         schedule_check_interval = millis();
     }
 
-
     // cek jika pintu terbuka secara paksa
     if(door_is_closed == false && solenoid_is_active == false && door_is_locked == true && waiting_timeout == false)
     {
+        actor_id = eeprom_read(door_id_addr);
+        
         // kirim peringatan
         alert_message = "Pintu terbuka tanpa autentikasi yang sah, Menunggu pintu ditutup ...";
         alert_status_change = true;
         
         // update status pintu terbuka
         door_is_locked = false;
-        lock_status_change = true;
 
         waiting_door_close = true;
-    }
+        door_in_alert = true;
+        door_must_lock = false;
 
+        lock_status_change = true;
+    }
 
     // delay untuk kestabilan
     delay(5);
+
+    // -------------- debug --------------------
+    
+//    Serial.print("is_locked: ");       Serial.print(door_is_locked);      Serial.print(" | ");
+//    Serial.print("is_closed: ");       Serial.print(door_is_closed);      Serial.print(" | ");
+//    Serial.print("must_lock: ");       Serial.print(door_must_lock);      Serial.print(" | ");
+//    Serial.print("in_alert: ");        Serial.print(door_in_alert);       Serial.print(" | ");
+//    Serial.print("solenoid: ");        Serial.print(solenoid_is_active);  Serial.print(" | ");
+//    Serial.print("lock_change: ");     Serial.print(lock_status_change);  Serial.print(" | ");
+//    Serial.print("alert_change: ");    Serial.print(alert_status_change); Serial.print(" | ");
+//    Serial.print("waiting_close: ");   Serial.print(waiting_door_close);  Serial.print(" | ");
+//    Serial.print("waiting_timeout: "); Serial.print(waiting_timeout);     Serial.print(" | ");
+//    Serial.println(" ");
 }
 

@@ -190,6 +190,7 @@ void door_command(JSONVar command)
         if(locking == "open")
         {
             door_is_locked = false;
+            door_must_lock = false;
             lock_status_change = true;
         }
         else if(locking == "lock")
@@ -201,7 +202,9 @@ void door_command(JSONVar command)
             }
             else
             {
-                door_is_locked = true; 
+                door_is_locked = true;
+                door_must_lock = true; 
+                door_in_alert  = false;
                 lock_status_change = true;  
             }
         }
@@ -233,6 +236,8 @@ void door_schedule(JSONVar schedule)
     String user_id = (const char*)schedule["user_id"];
     String key     = (const char*)schedule["key"];
 
+    actor_id = user_id;
+
     // jika jadwal untuk pintu ini
     if(door_id == eeprom_read(door_id_addr) && key == eeprom_read(door_key_addr))
     {
@@ -250,6 +255,7 @@ void door_schedule(JSONVar schedule)
 
             // buka kunci pintu
             door_is_locked = false;
+            door_must_lock = false;
             lock_status_change = true;
             
             // jalankan penjadwalan
@@ -259,8 +265,24 @@ void door_schedule(JSONVar schedule)
         }
         else if(command == "stop")
         {
-            // kunci pintu
-            door_is_locked = false;
+            if(door_is_closed == false)
+            {
+                alert_message = "Jadwal telah selesai tapi pintu masih terbuka, menunggu pintu tertutup ...";
+                alert_status_change = true;
+                
+                door_is_locked = false; 
+                waiting_door_close = true;
+            }
+            else
+            {
+                door_is_locked = true;
+                waiting_door_close = false;
+            }
+
+            lock_status_change = true; 
+            schedule_is_running = false;
+
+            door_must_lock = true;
             lock_status_change = true;
             
             schedule_is_running = false;
