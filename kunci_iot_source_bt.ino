@@ -122,8 +122,10 @@ bool device_got_signature = false;
 bool door_is_locked      = true;
 bool door_must_lock      = true;
 bool door_in_alert       = false;
+bool door_alert_on       = true;
 bool solenoid_is_active  = false;
 bool door_is_closed      = true;
+bool last_is_touch       = false;
 bool lock_status_change  = false;
 bool alert_status_change = false;
 bool waiting_door_close  = false;
@@ -400,13 +402,24 @@ void loop(void)
     }
 
     // jika sensor disentuh 
-    if((touch_avg <= 25) && waiting_door_close == false && door_is_closed == true && waiting_timeout == false && door_is_locked == false)
+    if((touch_avg <= 25) && waiting_door_close == false && door_is_closed == true && waiting_timeout == false && door_is_locked == false && last_is_touch == false)
     {
         set_solenoid_active(true);
 
         buzzer_count = 2;
         waiting_timeout = true;
+        last_is_touch = true;
         door_timeout = millis();
+    }
+
+    if (touch_avg > 25)
+    {
+        last_is_touch = false;
+
+        if(door_is_closed == true && solenoid_is_active == false)
+        {
+            waiting_timeout = false;
+        }
     }
 
     // cek penjadwalan
